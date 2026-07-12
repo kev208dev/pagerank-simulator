@@ -241,16 +241,42 @@
   };
 
   // === Layout ===
+  const SINGLE_RING_MAX = 14;
+
   function applyCircularLayout() {
     const cx = els.graphCanvas.clientWidth / 2;
     const cy = els.graphCanvas.clientHeight / 2;
-    const radius = Math.min(cx, cy) * 0.72;
     const n = state.nodes.length;
-    state.nodes.forEach((node, i) => {
-      const angle = (i / n) * Math.PI * 2 - Math.PI / 2;
-      node.x = cx + radius * Math.cos(angle);
-      node.y = cy + radius * Math.sin(angle);
-    });
+
+    if (n <= SINGLE_RING_MAX) {
+      const radius = Math.min(cx, cy) * 0.72;
+      state.nodes.forEach((node, i) => {
+        const angle = (i / n) * Math.PI * 2 - Math.PI / 2;
+        node.x = cx + radius * Math.cos(angle);
+        node.y = cy + radius * Math.sin(angle);
+      });
+      return;
+    }
+
+    // Dense graphs: spread nodes across concentric rings instead of one
+    // packed circle. Ring node-counts scale with ring radius so arc
+    // spacing (and therefore node separation) stays roughly constant
+    // across rings, instead of everything piling onto one circumference.
+    const maxRadius = Math.min(cx, cy) * 0.9;
+    const ringCount = Math.max(3, Math.ceil(Math.sqrt(n / 6)));
+    const weights = Array.from({ length: ringCount }, (_, i) => i + 1);
+    const totalWeight = weights.reduce((a, b) => a + b, 0);
+    let idx = 0;
+    for (let ring = 0; ring < ringCount; ring++) {
+      const ringRadius = maxRadius * ((ring + 1) / ringCount);
+      const isLast = ring === ringCount - 1;
+      const count = isLast ? n - idx : Math.round(n * weights[ring] / totalWeight);
+      for (let k = 0; k < count && idx < n; k++, idx++) {
+        const angle = (k / count) * Math.PI * 2 - Math.PI / 2 + ring * 0.35;
+        state.nodes[idx].x = cx + ringRadius * Math.cos(angle);
+        state.nodes[idx].y = cy + ringRadius * Math.sin(angle);
+      }
+    }
   }
 
   function nextPoolName() {
@@ -294,10 +320,14 @@
     const order = sortedByRank();
     const values = state.rank.length ? state.rank : state.nodes.map(() => 1 / state.nodes.length);
     const min = Math.min(...values), max = Math.max(...values);
+    // Dense graphs need much smaller nodes or they just overlap into a
+    // solid blob; shrink the whole size range as node count grows.
+    const sizeScale = Math.min(1, 12 / state.nodes.length);
+    const minR = 24 * sizeScale, maxR = 64 * sizeScale;
     state.nodes.forEach((node) => {
       const v = rankOf(node.id);
       const t = max > min ? (v - min) / (max - min) : 0.5;
-      node.r = 24 + t * 40;
+      node.r = minR + t * (maxR - minR);
       node.displayR = node.displayR ?? node.r;
       node.color = RANK_COLORS[order.findIndex((n) => n.id === node.id) % RANK_COLORS.length];
     });
@@ -311,10 +341,10 @@
     return `#${((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1)}`;
   }
 
-  function drawArrow(ctx, x1, y1, x2, y2, r2, color, dimmed) {
+  function drawArrow(ctx, x1, y1, r1, x2, y2, r2, color, dimmed) {
     const angle = Math.atan2(y2 - y1, x2 - x1);
-    const startX = x1 + Math.cos(angle) * 24;
-    const startY = y1 + Math.sin(angle) * 24;
+    const startX = x1 + Math.cos(angle) * r1;
+    const startY = y1 + Math.sin(angle) * r1;
     const endX = x2 - Math.cos(angle) * (r2 + 4);
     const endY = y2 - Math.sin(angle) * (r2 + 4);
     ctx.strokeStyle = color;
@@ -324,7 +354,7 @@
     ctx.moveTo(startX, startY);
     ctx.lineTo(endX, endY);
     ctx.stroke();
-    const headLen = 9;
+    const headLen = Math.min(9, r2 * 0.8);
     ctx.beginPath();
     ctx.moveTo(endX, endY);
     ctx.lineTo(endX - headLen * Math.cos(angle - Math.PI / 6), endY - headLen * Math.sin(angle - Math.PI / 6));
@@ -348,7 +378,7 @@
       if (!a || !b) continue;
       const isHi = state.highlighted.type === 'link' && state.highlighted.a === link.source && state.highlighted.b === link.target;
       const anyHi = state.highlighted.type !== null;
-      drawArrow(ctx, a.x, a.y, b.x, b.y, b.displayR, isHi ? '#4f46e5' : borderColor, anyHi && !isHi);
+      drawArrow(ctx, a.x, a.y, a.displayR, b.x, b.y, b.displayR, isHi ? '#4f46e5' : borderColor, anyHi && !isHi);
     }
 
     for (const node of state.nodes) {
@@ -376,11 +406,13 @@
       }
       ctx.globalAlpha = 1;
 
-      ctx.fillStyle = '#fff';
-      ctx.font = `600 ${Math.min(13, node.displayR * 0.34)}px -apple-system, sans-serif`;
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(node.name, node.x, node.y);
+      if (node.displayR >= 11) {
+        ctx.fillStyle = '#fff';
+        ctx.font = `600 ${Math.min(13, node.displayR * 0.34)}px -apple-system, sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(node.name, node.x, node.y);
+      }
     }
     requestAnimationFrame(renderGraph);
   }
