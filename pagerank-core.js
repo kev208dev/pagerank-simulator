@@ -116,6 +116,26 @@ const PRESETS = {
       { source: 'spam3', target: 'spam1' },
     ],
   },
+  textbook: {
+    label: '교과서 예제 (A~F)',
+    nodes: [
+      { id: 'a', name: 'A' },
+      { id: 'b', name: 'B' },
+      { id: 'c', name: 'C' },
+      { id: 'd', name: 'D' },
+      { id: 'e', name: 'E' },
+      { id: 'f', name: 'F' },
+    ],
+    links: [
+      { source: 'a', target: 'b' },
+      { source: 'a', target: 'f' },
+      { source: 'd', target: 'b' },
+      { source: 'd', target: 'c' },
+      { source: 'd', target: 'e' },
+      { source: 'c', target: 'f' },
+      { source: 'e', target: 'c' },
+    ],
+  },
 };
 
 const PageRankCore = {

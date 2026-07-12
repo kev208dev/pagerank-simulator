@@ -166,6 +166,7 @@
   </main>
   <div class="controls">
     <select id="presetSelect">
+      <option value="textbook">프리셋: 교과서 예제 (A~F)</option>
       <option value="balanced">프리셋: 균형 네트워크</option>
       <option value="hub">프리셋: 허브 구조</option>
       <option value="spamFarm">프리셋: 스팸 팜</option>
@@ -724,8 +725,8 @@
 
   els.resetBtn.addEventListener('click', () => {
     stopAuto();
-    els.presetSelect.value = 'balanced';
-    loadPreset('balanced');
+    els.presetSelect.value = 'textbook';
+    loadPreset('textbook');
     syncNodeButtons();
   });
 
@@ -754,7 +755,7 @@
 
   // === Bootstrap ===
   resizeCanvas();
-  loadPreset('balanced');
+  loadPreset('textbook');
   syncNodeButtons();
   requestAnimationFrame(renderGraph);
   </script>
