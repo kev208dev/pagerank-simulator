@@ -65,6 +65,7 @@
     padding: 16px 24px;
     min-height: 420px;
   }
+  main > * { min-width: 0; }
   .panel {
     background: var(--panel-bg);
     border: 1px solid var(--border);
@@ -88,11 +89,15 @@
   .rightCol { display: flex; flex-direction: column; gap: 16px; min-height: 0; }
   #matrixPanel { flex: 0 0 auto; max-height: 46%; }
   #rankPanel { flex: 1; min-height: 0; }
-  .matrix-body { overflow: auto; padding: 12px 16px; display: flex; justify-content: center; }
+  .matrix-body { overflow: auto; padding: 12px 16px; display: flex; justify-content: safe center; }
   table.matrix { border-collapse: collapse; font-variant-numeric: tabular-nums; font-size: calc(0.82rem * var(--scale)); }
   table.matrix th, table.matrix td {
     width: calc(46px * var(--scale)); height: calc(30px * var(--scale));
     text-align: center; border: 1px solid var(--border); transition: background 0.15s, opacity 0.15s;
+  }
+  table.matrix.compact { font-size: 0.6rem; }
+  table.matrix.compact th, table.matrix.compact td {
+    width: 24px; height: 17px; transition: none;
   }
   table.matrix th { color: var(--muted); font-weight: 500; background: var(--bg); }
   table.matrix td.highlight { background: var(--accent); color: #fff; font-weight: 700; }
@@ -218,7 +223,11 @@
   };
 
   const NODE_POOL = ['네이버', '학교 홈페이지', '내 블로그', '유튜브', '위키백과', '인스타그램', '디시인사이드', '넷플릭스', '트위터', '카카오톡'];
-  const RANK_COLORS = ['#f5b700', '#f2994a', '#eb5757', '#bb6bd9', '#6fcf97', '#4f46e5', '#2f80ed', '#56ccf2', '#9b9b9b', '#c4c4c4'];
+  // Validated palettes (dataviz six-checks, light/dark surfaces). 7 hues in
+  // fixed rank order + gray "Other" tail; dark mode gets its own gold step.
+  const RANK_COLORS_LIGHT = ['#d19000', '#e04b4b', '#b45fd6', '#33a065', '#5b54e8', '#2f80ed', '#26a3c9', '#9b9fae', '#b3b7c4', '#c9ccd6'];
+  const RANK_COLORS_DARK = ['#bd8300', '#e04b4b', '#b45fd6', '#33a065', '#5b54e8', '#2f80ed', '#26a3c9', '#8b8fa3', '#767b91', '#5f6478'];
+  function rankColors() { return state.dark ? RANK_COLORS_DARK : RANK_COLORS_LIGHT; }
 
   // === State ===
   const state = {
@@ -279,6 +288,64 @@
     }
   }
 
+  // === Force simulation (d3-force style: repulsion + link springs + centering) ===
+  // Runs inside the rAF loop; alpha decays toward rest, reheated on any graph change.
+  let simAlpha = 0;
+  function reheatSim(alpha) { simAlpha = Math.max(simAlpha, alpha); }
+
+  function tickSim() {
+    if (simAlpha < 0.005) return;
+    simAlpha *= 0.972;
+    const nodes = state.nodes;
+    const n = nodes.length;
+    if (n === 0) return;
+    const w = els.graphCanvas.clientWidth, h = els.graphCanvas.clientHeight;
+    const cx = w / 2, cy = h / 2;
+
+    const sizeScale = Math.min(1, 12 / n);
+    const charge = 2600 * sizeScale * sizeScale + 260;
+    const linkDist = Math.max(55, 150 * sizeScale);
+
+    for (const node of nodes) { node.vx = node.vx || 0; node.vy = node.vy || 0; }
+
+    for (let i = 0; i < n; i++) {
+      for (let j = i + 1; j < n; j++) {
+        const a = nodes[i], b = nodes[j];
+        let dx = b.x - a.x, dy = b.y - a.y;
+        let d2 = dx * dx + dy * dy;
+        if (d2 < 1) { dx = (Math.random() - 0.5); dy = (Math.random() - 0.5); d2 = 1; }
+        const d = Math.sqrt(d2);
+        const f = Math.min(6, (charge / d2) * simAlpha);
+        const fx = (dx / d) * f, fy = (dy / d) * f;
+        a.vx -= fx; a.vy -= fy;
+        b.vx += fx; b.vy += fy;
+      }
+    }
+
+    for (const link of state.links) {
+      const a = state.nodes.find((nd) => nd.id === link.source);
+      const b = state.nodes.find((nd) => nd.id === link.target);
+      if (!a || !b) continue;
+      const dx = b.x - a.x, dy = b.y - a.y;
+      const d = Math.hypot(dx, dy) || 1;
+      const f = (d - linkDist) * 0.045 * simAlpha;
+      const fx = (dx / d) * f, fy = (dy / d) * f;
+      a.vx += fx; a.vy += fy;
+      b.vx -= fx; b.vy -= fy;
+    }
+
+    const pad = 30;
+    for (const node of nodes) {
+      if (node === dragNode) { node.vx = 0; node.vy = 0; continue; }
+      node.vx += (cx - node.x) * 0.012 * simAlpha;
+      node.vy += (cy - node.y) * 0.012 * simAlpha;
+      node.vx *= 0.82;
+      node.vy *= 0.82;
+      node.x = Math.max(pad, Math.min(w - pad, node.x + node.vx));
+      node.y = Math.max(pad, Math.min(h - pad, node.y + node.vy));
+    }
+  }
+
   function nextPoolName() {
     const used = new Set(state.nodes.map((n) => n.name));
     return NODE_POOL.find((name) => !used.has(name)) || `페이지${state.nodes.length + 1}`;
@@ -304,6 +371,7 @@
     state.pendingSource = null;
     resizeCanvas();
     applyCircularLayout();
+    reheatSim(1);
     resetComputation();
   }
 
@@ -329,16 +397,12 @@
       const t = max > min ? (v - min) / (max - min) : 0.5;
       node.r = minR + t * (maxR - minR);
       node.displayR = node.displayR ?? node.r;
-      node.color = RANK_COLORS[order.findIndex((n) => n.id === node.id) % RANK_COLORS.length];
+      // Top ranks get distinct hues; everything past the palette folds into
+      // the gray tail instead of cycling (cycling would repaint rank 11 as rank 1).
+      const colors = rankColors();
+      node.rankIndex = order.findIndex((n) => n.id === node.id);
+      node.color = colors[Math.min(node.rankIndex, colors.length - 1)];
     });
-  }
-
-  function shade(hex, percent) {
-    const num = parseInt(hex.slice(1), 16);
-    const r = Math.min(255, Math.max(0, ((num >> 16) & 255) + percent));
-    const g = Math.min(255, Math.max(0, ((num >> 8) & 255) + percent));
-    const b = Math.min(255, Math.max(0, (num & 255) + percent));
-    return `#${((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1)}`;
   }
 
   function drawArrow(ctx, x1, y1, r1, x2, y2, r2, color, dimmed) {
@@ -367,10 +431,15 @@
   }
 
   function renderGraph() {
+    tickSim();
     const ctx = els.graphCanvas.getContext('2d');
     const w = els.graphCanvas.clientWidth, h = els.graphCanvas.clientHeight;
     ctx.clearRect(0, 0, w, h);
-    const borderColor = getComputedStyle(document.documentElement).getPropertyValue('--muted').trim();
+    const styles = getComputedStyle(document.documentElement);
+    const edgeColor = styles.getPropertyValue('--muted').trim();
+    const surface = styles.getPropertyValue('--panel-bg').trim();
+    const ink = styles.getPropertyValue('--text').trim();
+    const dense = state.nodes.length > SINGLE_RING_MAX;
 
     for (const link of state.links) {
       const a = state.nodes.find((n) => n.id === link.source);
@@ -378,7 +447,7 @@
       if (!a || !b) continue;
       const isHi = state.highlighted.type === 'link' && state.highlighted.a === link.source && state.highlighted.b === link.target;
       const anyHi = state.highlighted.type !== null;
-      drawArrow(ctx, a.x, a.y, a.displayR, b.x, b.y, b.displayR, isHi ? '#4f46e5' : borderColor, anyHi && !isHi);
+      drawArrow(ctx, a.x, a.y, a.displayR, b.x, b.y, b.displayR, isHi ? '#4f46e5' : edgeColor, anyHi && !isHi);
     }
 
     for (const node of state.nodes) {
@@ -387,31 +456,47 @@
       const isSelected = state.selectedNode === node.id;
       const isPending = state.pendingSource === node.id;
       const anyHi = state.highlighted.type !== null;
+      const emphasized = isHi || isSelected || isPending;
 
-      ctx.globalAlpha = anyHi && !isHi ? 0.35 : 1;
-      const grad = ctx.createRadialGradient(node.x - node.displayR * 0.3, node.y - node.displayR * 0.3, 2, node.x, node.y, node.displayR);
-      grad.addColorStop(0, node.color);
-      grad.addColorStop(1, shade(node.color, -25));
+      ctx.globalAlpha = anyHi && !isHi ? 0.3 : 1;
       ctx.beginPath();
       ctx.arc(node.x, node.y, node.displayR, 0, Math.PI * 2);
-      ctx.fillStyle = grad;
-      ctx.shadowColor = node.color;
-      ctx.shadowBlur = isHi || isSelected ? 22 : 8;
+      ctx.fillStyle = node.color;
+      if (emphasized) {
+        ctx.shadowColor = node.color;
+        ctx.shadowBlur = 18;
+      }
       ctx.fill();
       ctx.shadowBlur = 0;
-      if (isSelected || isPending) {
-        ctx.lineWidth = 3;
-        ctx.strokeStyle = isPending ? '#06b6d4' : '#ffffff';
+      // 2px surface ring separates overlapping marks (dataviz spacer rule)
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = surface;
+      ctx.stroke();
+      if (isPending || isSelected) {
+        ctx.lineWidth = 2.5;
+        ctx.strokeStyle = isPending ? '#06b6d4' : node.color;
+        ctx.beginPath();
+        ctx.arc(node.x, node.y, node.displayR + 4, 0, Math.PI * 2);
         ctx.stroke();
       }
       ctx.globalAlpha = 1;
 
-      if (node.displayR >= 11) {
+      // Labels: small graphs label inside every node; dense graphs label only
+      // the top ranks (and any hovered/selected node) beneath the dot in ink.
+      if (!dense && node.displayR >= 11) {
         ctx.fillStyle = '#fff';
         ctx.font = `600 ${Math.min(13, node.displayR * 0.34)}px -apple-system, sans-serif`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.fillText(node.name, node.x, node.y);
+      } else if (dense && (emphasized || node.rankIndex < 5)) {
+        ctx.globalAlpha = anyHi && !isHi ? 0.3 : 1;
+        ctx.fillStyle = ink;
+        ctx.font = `600 11px -apple-system, sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'top';
+        ctx.fillText(node.name, node.x, node.y + node.displayR + 3);
+        ctx.globalAlpha = 1;
       }
     }
     requestAnimationFrame(renderGraph);
@@ -460,20 +545,29 @@
     if (node) { dragNode = node; dragMoved = false; }
   });
 
+  let lastHighlightKey = '::';
+  function setHighlighted(type, a, b) {
+    const key = `${type}:${a}:${b}`;
+    if (key === lastHighlightKey) return;
+    lastHighlightKey = key;
+    state.highlighted = { type, a, b };
+    renderMatrix();
+  }
+
   els.graphCanvas.addEventListener('mousemove', (evt) => {
     const { x, y } = canvasPoint(evt);
     if (dragNode) {
       dragNode.x = x;
       dragNode.y = y;
       dragMoved = true;
+      reheatSim(0.25);
       return;
     }
     const node = nodeAt(x, y);
     const link = node ? null : linkAt(x, y);
-    if (node) state.highlighted = { type: 'node', a: node.id, b: null };
-    else if (link) state.highlighted = { type: 'link', a: link.source, b: link.target };
-    else state.highlighted = { type: null, a: null, b: null };
-    renderMatrix();
+    if (node) setHighlighted('node', node.id, null);
+    else if (link) setHighlighted('link', link.source, link.target);
+    else setHighlighted(null, null, null);
     els.graphCanvas.style.cursor = node || link ? 'pointer' : 'grab';
   });
 
@@ -490,6 +584,7 @@
     const link = linkAt(x, y);
     if (link) {
       state.links = state.links.filter((l) => l !== link);
+      reheatSim(0.6);
       recomputeAfterGraphChange();
       return;
     }
@@ -506,6 +601,7 @@
         const exists = state.links.some((l) => l.source === state.pendingSource && l.target === node.id);
         if (!exists) state.links.push({ source: state.pendingSource, target: node.id });
         state.pendingSource = null;
+        reheatSim(0.6);
         recomputeAfterGraphChange();
       }
     } else {
@@ -527,6 +623,7 @@
     const id = `n${Date.now()}`;
     state.nodes.push({ id, name: nextPoolName(), r: 34, displayR: 34, color: '#999' });
     applyCircularLayout();
+    reheatSim(1);
     recomputeAfterGraphChange();
     syncNodeButtons();
   });
@@ -538,6 +635,7 @@
     state.links = state.links.filter((l) => l.source !== targetId && l.target !== targetId);
     state.selectedNode = null;
     applyCircularLayout();
+    reheatSim(1);
     recomputeAfterGraphChange();
     syncNodeButtons();
   });
@@ -569,9 +667,14 @@
     els.matrixToggle.textContent = state.matrixView === 'adjacency' ? '전이행렬 보기' : '인접행렬 보기';
 
     const n = state.nodes.length;
-    let html = '<tr><th></th>' + state.nodes.map((node) => `<th title="${node.name}">${node.name.slice(0, 2)}</th>`).join('') + '</tr>';
+    const dense = n > SINGLE_RING_MAX;
+    els.matrixTable.classList.toggle('compact', dense);
+    // Dense graphs: 2-char name prefixes are all identical (사이, 사이, ...);
+    // number headers stay unique and fit the compact cells.
+    const headerOf = (node, i) => dense ? String(i + 1) : node.name.slice(0, 2);
+    let html = '<tr><th></th>' + state.nodes.map((node, i) => `<th title="${node.name}">${headerOf(node, i)}</th>`).join('') + '</tr>';
     for (let i = 0; i < n; i++) {
-      html += `<tr><th title="${state.nodes[i].name}">${state.nodes[i].name.slice(0, 2)}</th>`;
+      html += `<tr><th title="${state.nodes[i].name}">${headerOf(state.nodes[i], i)}</th>`;
       for (let j = 0; j < n; j++) {
         const isHi = isCellHighlighted(i, j);
         const dim = state.highlighted.type !== null && !isHi;
@@ -593,12 +696,10 @@
     const row = Number(cell.dataset.row), col = Number(cell.dataset.col);
     const targetNode = state.nodes[row], sourceNode = state.nodes[col];
     if (!targetNode || !sourceNode) return;
-    state.highlighted = { type: 'link', a: sourceNode.id, b: targetNode.id };
-    renderMatrix();
+    setHighlighted('link', sourceNode.id, targetNode.id);
   });
   els.matrixTable.addEventListener('mouseleave', () => {
-    state.highlighted = { type: null, a: null, b: null };
-    renderMatrix();
+    setHighlighted(null, null, null);
   });
 
   // === PageRank engine ===
@@ -745,18 +846,27 @@
     }
 
     const order = sortedByRank();
-    const pointRadius = history.length <= 30 ? 3 : 0;
-    state.nodes.forEach((node) => {
+    const dense = state.nodes.length > SINGLE_RING_MAX;
+    const pointRadius = history.length <= 30 && !dense ? 3 : 0;
+    const colors = rankColors();
+    // Dense graphs: color only the top-7 ranked series; the long tail draws
+    // first in recessive gray so leaders stay readable on top.
+    const drawOrder = [...state.nodes].sort((a, b) =>
+      (order.findIndex((n) => n.id === b.id)) - (order.findIndex((n) => n.id === a.id)));
+    drawOrder.forEach((node) => {
       const colorIdx = order.findIndex((n) => n.id === node.id);
-      const color = RANK_COLORS[colorIdx % RANK_COLORS.length];
+      const isTail = dense && colorIdx >= 7;
+      const color = isTail ? border : colors[Math.min(colorIdx, colors.length - 1)];
       ctx.strokeStyle = color;
-      ctx.lineWidth = 2;
+      ctx.globalAlpha = isTail ? 0.5 : 1;
+      ctx.lineWidth = isTail ? 1 : 2;
       ctx.beginPath();
       history.forEach((point, i) => {
         const x = xOf(point.iteration), y = yOf(point.values[node.id] ?? 0);
         i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
       });
       ctx.stroke();
+      ctx.globalAlpha = 1;
       if (pointRadius > 0) {
         ctx.fillStyle = color;
         history.forEach((point) => {
@@ -802,6 +912,10 @@
     document.documentElement.setAttribute('data-theme', state.dark ? 'dark' : 'light');
     els.darkBtn.classList.toggle('active', state.dark);
     els.darkBtn.textContent = state.dark ? '라이트 모드' : '다크 모드';
+    // Palette is mode-specific; recolor nodes, rank list, and chart.
+    updateNodeVisuals();
+    renderRankListAnimated();
+    renderChart();
   });
 
   window.addEventListener('keydown', (evt) => {
