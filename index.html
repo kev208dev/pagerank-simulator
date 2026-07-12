@@ -167,10 +167,9 @@
   <div class="controls">
     <select id="presetSelect">
       <option value="textbook">프리셋: PPT 예시 (A~F)</option>
-      <option value="balanced">프리셋: 균형 네트워크</option>
       <option value="hub">프리셋: 허브 구조</option>
       <option value="spamFarm">프리셋: 스팸 팜</option>
-      <option value="newsEcosystem">프리셋: 실제 사례 (포털-언론 생태계)</option>
+      <option value="newsEcosystem">프리셋: 실제 사례 (웹 생태계, 노드 60개)</option>
     </select>
     <button id="addNodeBtn">노드 추가</button>
     <button id="removeNodeBtn">노드 삭제</button>
@@ -225,6 +224,7 @@
   const state = {
     nodes: [],       // {id, name, x, y, r, displayR, color}
     links: [],       // {source, target}
+    nodeCap: 10,     // max nodes allowed; presets can raise this (e.g. the 60-node scale demo)
     damping: 0,
     iteration: 0,
     rank: [],
@@ -273,6 +273,7 @@
     const preset = PageRankCore.PRESETS[key];
     state.nodes = preset.nodes.map((n) => ({ ...n, r: 34, displayR: 34, color: '#999' }));
     state.links = preset.links.map((l) => ({ ...l }));
+    state.nodeCap = Math.max(10, state.nodes.length);
     state.selectedNode = null;
     state.pendingSource = null;
     resizeCanvas();
@@ -490,7 +491,7 @@
   });
 
   els.addNodeBtn.addEventListener('click', () => {
-    if (state.nodes.length >= 10) return;
+    if (state.nodes.length >= state.nodeCap) return;
     const id = `n${Date.now()}`;
     state.nodes.push({ id, name: nextPoolName(), r: 34, displayR: 34, color: '#999' });
     applyCircularLayout();
@@ -510,7 +511,7 @@
   });
 
   function syncNodeButtons() {
-    els.addNodeBtn.disabled = state.nodes.length >= 10;
+    els.addNodeBtn.disabled = state.nodes.length >= state.nodeCap;
     els.removeNodeBtn.disabled = state.nodes.length <= 3;
   }
 
@@ -596,7 +597,6 @@
   }
 
   function stepOnce() {
-    if (state.converged) return;
     const matrix = PageRankCore.buildTransition(state.nodes, state.links);
     const next = PageRankCore.stepPageRank(matrix, state.rank, state.damping);
     const delta = PageRankCore.maxDelta(state.rank, next);
@@ -618,7 +618,7 @@
 
   let autoTimer = null;
   function startAuto() {
-    if (state.converged || state.nodes.length === 0) return;
+    if (state.nodes.length === 0) return;
     state.running = true;
     els.autoBtn.textContent = '일시정지';
     els.autoBtn.classList.add('active');

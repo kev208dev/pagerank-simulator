@@ -56,28 +56,63 @@ function isConverged(delta, iteration, { epsilon = 0.00001, maxIterations = 150 
   return delta < epsilon || iteration >= maxIterations;
 }
 
+function mulberry32(seed) {
+  return function () {
+    seed |= 0;
+    seed = (seed + 0x6d2b79f5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+// Barabasi-Albert-style preferential attachment: each new site links to a
+// couple of already-popular sites, so early sites snowball into hubs -
+// the same "rich get richer" shape real web link graphs have.
+function generateScaleFreeGraph(n, seed) {
+  const rand = mulberry32(seed);
+  const nodes = Array.from({ length: n }, (_, i) => ({
+    id: `site${i + 1}`,
+    name: `사이트${String(i + 1).padStart(2, '0')}`,
+  }));
+  const links = [];
+  const linkKeys = new Set();
+  const inDegree = new Array(n).fill(1);
+
+  function addLink(from, to) {
+    const key = `${from}->${to}`;
+    if (from === to || linkKeys.has(key)) return false;
+    linkKeys.add(key);
+    links.push({ source: nodes[from].id, target: nodes[to].id });
+    inDegree[to] += 1;
+    return true;
+  }
+
+  addLink(1, 0);
+  addLink(2, 0);
+  addLink(2, 1);
+
+  for (let i = 3; i < n; i++) {
+    const linksToMake = rand() < 0.3 ? 3 : 2;
+    let made = 0;
+    let attempts = 0;
+    while (made < linksToMake && attempts < 20) {
+      attempts++;
+      const totalWeight = inDegree.slice(0, i).reduce((a, b) => a + b, 0);
+      let r = rand() * totalWeight;
+      let target = 0;
+      for (let j = 0; j < i; j++) {
+        r -= inDegree[j];
+        if (r <= 0) { target = j; break; }
+      }
+      if (addLink(i, target)) made++;
+    }
+  }
+
+  return { label: '실제 사례: 웹 생태계 (노드 60개)', nodes, links };
+}
+
 const PRESETS = {
-  balanced: {
-    label: '균형 잡힌 기본 네트워크',
-    nodes: [
-      { id: 'naver', name: '네이버' },
-      { id: 'school', name: '학교 홈페이지' },
-      { id: 'blog', name: '내 블로그' },
-      { id: 'youtube', name: '유튜브' },
-      { id: 'wiki', name: '위키백과' },
-      { id: 'insta', name: '인스타그램' },
-    ],
-    links: [
-      { source: 'naver', target: 'wiki' },
-      { source: 'school', target: 'wiki' },
-      { source: 'blog', target: 'youtube' },
-      { source: 'youtube', target: 'wiki' },
-      { source: 'insta', target: 'naver' },
-      { source: 'wiki', target: 'school' },
-      { source: 'school', target: 'blog' },
-      { source: 'blog', target: 'insta' },
-    ],
-  },
   hub: {
     label: '허브 구조 (백링크 집중)',
     nodes: [
@@ -136,34 +171,7 @@ const PRESETS = {
       { source: 'e', target: 'c' },
     ],
   },
-  newsEcosystem: {
-    label: '실제 사례: 포털-언론 생태계',
-    nodes: [
-      { id: 'portal', name: '포털' },
-      { id: 'daily', name: '종합일간지' },
-      { id: 'econ', name: '경제신문' },
-      { id: 'itmedia', name: 'IT매체' },
-      { id: 'ytnews', name: '유튜브뉴스' },
-      { id: 'community', name: '커뮤니티' },
-      { id: 'blogger', name: '블로거' },
-      { id: 'sns', name: 'SNS' },
-    ],
-    links: [
-      { source: 'daily', target: 'portal' },
-      { source: 'econ', target: 'portal' },
-      { source: 'itmedia', target: 'portal' },
-      { source: 'ytnews', target: 'portal' },
-      { source: 'sns', target: 'portal' },
-      { source: 'sns', target: 'ytnews' },
-      { source: 'community', target: 'daily' },
-      { source: 'community', target: 'itmedia' },
-      { source: 'blogger', target: 'itmedia' },
-      { source: 'blogger', target: 'econ' },
-      { source: 'portal', target: 'daily' },
-      { source: 'portal', target: 'econ' },
-      { source: 'itmedia', target: 'blogger' },
-    ],
-  },
+  newsEcosystem: generateScaleFreeGraph(60, 42),
 };
 
 const PageRankCore = {
