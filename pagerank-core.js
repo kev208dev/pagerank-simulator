@@ -52,7 +52,7 @@ function maxDelta(a, b) {
   return max;
 }
 
-function isConverged(delta, iteration, { epsilon = 0.0001, maxIterations = 100 } = {}) {
+function isConverged(delta, iteration, { epsilon = 0.00001, maxIterations = 150 } = {}) {
   return delta < epsilon || iteration >= maxIterations;
 }
 
@@ -117,7 +117,7 @@ const PRESETS = {
     ],
   },
   textbook: {
-    label: '교과서 예제 (A~F)',
+    label: 'PPT 예시 (A~F)',
     nodes: [
       { id: 'a', name: 'A' },
       { id: 'b', name: 'B' },
@@ -134,6 +134,34 @@ const PRESETS = {
       { source: 'd', target: 'e' },
       { source: 'c', target: 'f' },
       { source: 'e', target: 'c' },
+    ],
+  },
+  newsEcosystem: {
+    label: '실제 사례: 포털-언론 생태계',
+    nodes: [
+      { id: 'portal', name: '포털' },
+      { id: 'daily', name: '종합일간지' },
+      { id: 'econ', name: '경제신문' },
+      { id: 'itmedia', name: 'IT매체' },
+      { id: 'ytnews', name: '유튜브뉴스' },
+      { id: 'community', name: '커뮤니티' },
+      { id: 'blogger', name: '블로거' },
+      { id: 'sns', name: 'SNS' },
+    ],
+    links: [
+      { source: 'daily', target: 'portal' },
+      { source: 'econ', target: 'portal' },
+      { source: 'itmedia', target: 'portal' },
+      { source: 'ytnews', target: 'portal' },
+      { source: 'sns', target: 'portal' },
+      { source: 'sns', target: 'ytnews' },
+      { source: 'community', target: 'daily' },
+      { source: 'community', target: 'itmedia' },
+      { source: 'blogger', target: 'itmedia' },
+      { source: 'blogger', target: 'econ' },
+      { source: 'portal', target: 'daily' },
+      { source: 'portal', target: 'econ' },
+      { source: 'itmedia', target: 'blogger' },
     ],
   },
 };

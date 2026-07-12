@@ -77,9 +77,9 @@ test('isConverged is true once maxIterations is reached regardless of delta', ()
   assert.equal(isConverged(0.5, 100, { epsilon: 0.0001, maxIterations: 100 }), true);
 });
 
-test('PRESETS has exactly balanced/hub/spamFarm/textbook, each with 3-10 nodes and valid link endpoints', () => {
+test('PRESETS has exactly balanced/hub/newsEcosystem/spamFarm/textbook, each with 3-10 nodes and valid link endpoints', () => {
   const keys = Object.keys(PRESETS).sort();
-  assert.deepEqual(keys, ['balanced', 'hub', 'spamFarm', 'textbook']);
+  assert.deepEqual(keys, ['balanced', 'hub', 'newsEcosystem', 'spamFarm', 'textbook']);
   for (const key of keys) {
     const preset = PRESETS[key];
     assert.ok(preset.nodes.length >= 3 && preset.nodes.length <= 10, `${key} node count in range`);

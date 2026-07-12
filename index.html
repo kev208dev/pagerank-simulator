@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>MiniRank — 행렬로 재현하는 구글 검색</title>
+<title>PageRank Simulator — 행렬로 재현하는 구글 검색</title>
 <style>
   :root {
     --bg: #f4f5f8;
@@ -125,7 +125,7 @@
   .controls .damping { display: flex; align-items: center; gap: 8px; color: var(--muted); }
   .controls .damping span { color: var(--text); font-variant-numeric: tabular-nums; min-width: 2.4em; }
   .controls .spacer { flex: 1; }
-  #chartPanel { height: 220px; margin: 0 24px 16px; }
+  #chartPanel { height: 340px; margin: 0 24px 16px; }
   #chartPanel canvas { width: 100%; height: 100%; display: block; }
   .badge {
     font-size: calc(0.78rem * var(--scale)); padding: 3px 9px; border-radius: 999px;
@@ -136,7 +136,7 @@
 </head>
 <body>
   <header>
-    <h1>MiniRank</h1>
+    <h1>PageRank Simulator</h1>
     <p>행렬로 재현하는 구글 검색의 핵심</p>
   </header>
   <main>
@@ -166,10 +166,11 @@
   </main>
   <div class="controls">
     <select id="presetSelect">
-      <option value="textbook">프리셋: 교과서 예제 (A~F)</option>
+      <option value="textbook">프리셋: PPT 예시 (A~F)</option>
       <option value="balanced">프리셋: 균형 네트워크</option>
       <option value="hub">프리셋: 허브 구조</option>
       <option value="spamFarm">프리셋: 스팸 팜</option>
+      <option value="newsEcosystem">프리셋: 실제 사례 (포털-언론 생태계)</option>
     </select>
     <button id="addNodeBtn">노드 추가</button>
     <button id="removeNodeBtn">노드 삭제</button>
@@ -177,8 +178,8 @@
     <button id="resetBtn">초기화</button>
     <span class="spacer"></span>
     <label class="damping">감쇠계수 d
-      <input type="range" id="dampingSlider" min="0.5" max="1.0" step="0.01" value="0.85">
-      <span id="dampingValue">0.85</span>
+      <input type="range" id="dampingSlider" min="0" max="1.0" step="0.01" value="0">
+      <span id="dampingValue">0.00</span>
     </label>
     <button id="stepBtn">다음 단계</button>
     <button id="autoBtn" class="primary">계산 시작</button>
@@ -224,7 +225,7 @@
   const state = {
     nodes: [],       // {id, name, x, y, r, displayR, color}
     links: [],       // {source, target}
-    damping: 0.85,
+    damping: 0,
     iteration: 0,
     rank: [],
     rankHistory: [], // [{iteration, values: {id: rank}}]
@@ -266,7 +267,7 @@
       canvas.getContext('2d').setTransform(dpr, 0, 0, dpr, 0, 0);
     }
   }
-  window.addEventListener('resize', () => { resizeCanvas(); applyCircularLayout(); });
+  window.addEventListener('resize', () => { resizeCanvas(); applyCircularLayout(); renderChart(); });
 
   function loadPreset(key) {
     const preset = PageRankCore.PRESETS[key];
@@ -677,30 +678,46 @@
   function renderChart() {
     const ctx = els.chartCanvas.getContext('2d');
     const w = els.chartCanvas.clientWidth, h = els.chartCanvas.clientHeight;
-    const pad = { l: 40, r: 16, t: 16, b: 26 };
+    const pad = { l: 46, r: 16, t: 16, b: 26 };
     ctx.clearRect(0, 0, w, h);
     const history = state.rankHistory;
     if (history.length < 2) return;
 
+    const muted = getComputedStyle(document.documentElement).getPropertyValue('--muted').trim();
+    const border = getComputedStyle(document.documentElement).getPropertyValue('--border').trim();
+
     const maxIter = history[history.length - 1].iteration;
     const allValues = history.flatMap((point) => Object.values(point.values));
-    const maxVal = Math.max(0.01, ...allValues);
+    const maxVal = Math.max(0.01, ...allValues) * 1.08;
 
     const xOf = (iter) => pad.l + (iter / Math.max(1, maxIter)) * (w - pad.l - pad.r);
     const yOf = (val) => h - pad.b - (val / maxVal) * (h - pad.t - pad.b);
 
-    ctx.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue('--border').trim();
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(pad.l, pad.t);
-    ctx.lineTo(pad.l, h - pad.b);
-    ctx.lineTo(w - pad.r, h - pad.b);
-    ctx.stroke();
+    // horizontal gridlines + y-axis value labels
+    ctx.strokeStyle = border;
+    ctx.fillStyle = muted;
+    ctx.font = '11px sans-serif';
+    ctx.textAlign = 'right';
+    ctx.textBaseline = 'middle';
+    const GRID_STEPS = 4;
+    for (let i = 0; i <= GRID_STEPS; i++) {
+      const val = (maxVal / GRID_STEPS) * i;
+      const y = yOf(val);
+      ctx.globalAlpha = i === 0 ? 1 : 0.5;
+      ctx.beginPath();
+      ctx.moveTo(pad.l, y);
+      ctx.lineTo(w - pad.r, y);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+      ctx.fillText(val.toFixed(3), pad.l - 8, y);
+    }
 
     const order = sortedByRank();
+    const pointRadius = history.length <= 30 ? 3 : 0;
     state.nodes.forEach((node) => {
       const colorIdx = order.findIndex((n) => n.id === node.id);
-      ctx.strokeStyle = RANK_COLORS[colorIdx % RANK_COLORS.length];
+      const color = RANK_COLORS[colorIdx % RANK_COLORS.length];
+      ctx.strokeStyle = color;
       ctx.lineWidth = 2;
       ctx.beginPath();
       history.forEach((point, i) => {
@@ -708,11 +725,21 @@
         i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
       });
       ctx.stroke();
+      if (pointRadius > 0) {
+        ctx.fillStyle = color;
+        history.forEach((point) => {
+          const x = xOf(point.iteration), y = yOf(point.values[node.id] ?? 0);
+          ctx.beginPath();
+          ctx.arc(x, y, pointRadius, 0, Math.PI * 2);
+          ctx.fill();
+        });
+      }
     });
 
-    ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--muted').trim();
+    ctx.fillStyle = muted;
     ctx.font = '11px sans-serif';
     ctx.textAlign = 'center';
+    ctx.textBaseline = 'alphabetic';
     ctx.fillText(`반복 횟수 (0-${maxIter})`, (pad.l + w - pad.r) / 2, h - 6);
   }
 
