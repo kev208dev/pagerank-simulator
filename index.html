@@ -187,7 +187,6 @@
     </label>
     <button id="stepBtn">다음 단계</button>
     <button id="autoBtn" class="primary">계산 시작</button>
-    <button id="presentBtn">발표 모드</button>
     <button id="darkBtn">다크 모드</button>
   </div>
   <section id="chartPanel" class="panel">
@@ -217,7 +216,6 @@
     dampingValue: document.getElementById('dampingValue'),
     stepBtn: document.getElementById('stepBtn'),
     autoBtn: document.getElementById('autoBtn'),
-    presentBtn: document.getElementById('presentBtn'),
     darkBtn: document.getElementById('darkBtn'),
     chartCanvas: document.getElementById('chartCanvas'),
   };
@@ -238,6 +236,7 @@
     iteration: 0,
     rank: [],
     rankHistory: [], // [{iteration, values: {id: rank}}]
+    powerMatrix: [], // G^t — accumulated matrix power, one multiply per step
     converged: false,
     running: false,
     linkMode: false,
@@ -245,7 +244,6 @@
     selectedNode: null,
     highlighted: { type: null, a: null, b: null },
     matrixView: 'transition',
-    presentation: false,
     dark: false,
   };
 
@@ -681,6 +679,12 @@
     return Math.abs(v - 1 / denom) < 1e-9 && denom > 1 ? `1/${denom}` : v.toFixed(2);
   }
 
+  function fmtDecimal(v) {
+    if (v === 0) return '0';
+    if (v === 1) return '1';
+    return v.toFixed(2).replace(/^0\./, '.');
+  }
+
   function isCellHighlighted(rowIdx, colIdx) {
     const h = state.highlighted;
     if (h.type === 'node') return state.nodes[rowIdx]?.id === h.a || state.nodes[colIdx]?.id === h.a;
@@ -688,12 +692,26 @@
     return false;
   }
 
+  // View cycle: transition -> adjacency -> power -> transition ...
+  const MATRIX_VIEWS = {
+    transition: { title: '전이행렬 M', next: 'adjacency', nextLabel: '인접행렬 보기' },
+    adjacency: { title: '인접행렬 A', next: 'power', nextLabel: '거듭제곱 Mᵗ 보기' },
+    power: { title: '', next: 'transition', nextLabel: '전이행렬 보기' },
+  };
+
   function renderMatrix() {
-    const matrix = state.matrixView === 'adjacency'
-      ? PageRankCore.buildAdjacency(state.nodes, state.links)
-      : PageRankCore.buildTransition(state.nodes, state.links);
-    els.matrixTitle.textContent = state.matrixView === 'adjacency' ? '인접행렬 A' : '전이행렬 M';
-    els.matrixToggle.textContent = state.matrixView === 'adjacency' ? '전이행렬 보기' : '인접행렬 보기';
+    const view = MATRIX_VIEWS[state.matrixView];
+    let matrix;
+    if (state.matrixView === 'adjacency') {
+      matrix = PageRankCore.buildAdjacency(state.nodes, state.links);
+    } else if (state.matrixView === 'power') {
+      matrix = state.powerMatrix;
+      view.title = `행렬 거듭제곱 Mᵗ (t=${state.iteration})`;
+    } else {
+      matrix = PageRankCore.buildTransition(state.nodes, state.links);
+    }
+    els.matrixTitle.textContent = view.title;
+    els.matrixToggle.textContent = view.nextLabel;
 
     const n = state.nodes.length;
     const dense = n > SINGLE_RING_MAX;
@@ -707,7 +725,8 @@
       for (let j = 0; j < n; j++) {
         const isHi = isCellHighlighted(i, j);
         const dim = state.highlighted.type !== null && !isHi;
-        html += `<td data-row="${i}" data-col="${j}" class="${isHi ? 'highlight' : ''} ${dim ? 'dim' : ''}">${fmt(matrix[i][j])}</td>`;
+        const text = state.matrixView === 'power' ? fmtDecimal(matrix[i][j]) : fmt(matrix[i][j]);
+        html += `<td data-row="${i}" data-col="${j}" class="${isHi ? 'highlight' : ''} ${dim ? 'dim' : ''}">${text}</td>`;
       }
       html += '</tr>';
     }
@@ -715,7 +734,7 @@
   }
 
   els.matrixToggle.addEventListener('click', () => {
-    state.matrixView = state.matrixView === 'adjacency' ? 'transition' : 'adjacency';
+    state.matrixView = MATRIX_VIEWS[state.matrixView].next;
     renderMatrix();
   });
 
@@ -749,6 +768,7 @@
     state.converged = false;
     state.rank = PageRankCore.initRankVector(state.nodes.length);
     state.rankHistory = [{ iteration: 0, values: snapshotRanks() }];
+    state.powerMatrix = PageRankCore.identityMatrix(state.nodes.length);
     state.running = false;
     els.autoBtn.textContent = '계산 시작';
     updateNodeVisuals();
@@ -763,6 +783,10 @@
     const next = PageRankCore.stepPageRank(matrix, state.rank, state.damping);
     const delta = PageRankCore.maxDelta(state.rank, next);
     state.rank = next;
+    // One iteration = one more multiplication: M^(t+1) = G · M^t, where G
+    // folds in the damping term so the power view matches the rank vector.
+    const google = PageRankCore.buildGoogle(state.nodes, state.links, state.damping);
+    state.powerMatrix = PageRankCore.matMul(google, state.powerMatrix);
     state.iteration += 1;
     state.rankHistory.push({ iteration: state.iteration, values: snapshotRanks() });
     state.converged = PageRankCore.isConverged(delta, state.iteration);
@@ -928,14 +952,7 @@
     syncNodeButtons();
   });
 
-  // === Presentation mode ===
-  els.presentBtn.addEventListener('click', () => {
-    state.presentation = !state.presentation;
-    document.documentElement.style.setProperty('--scale', state.presentation ? '1.35' : '1');
-    els.presentBtn.classList.toggle('active', state.presentation);
-    els.presentBtn.textContent = state.presentation ? '발표 모드 (끄기)' : '발표 모드';
-  });
-
+  // === Dark mode ===
   els.darkBtn.addEventListener('click', () => {
     state.dark = !state.dark;
     document.documentElement.setAttribute('data-theme', state.dark ? 'dark' : 'light');

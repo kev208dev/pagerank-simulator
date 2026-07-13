@@ -31,6 +31,33 @@ function buildTransition(nodes, links) {
   return matrix;
 }
 
+function buildGoogle(nodes, links, damping) {
+  const n = nodes.length;
+  const M = buildTransition(nodes, links);
+  const teleport = (1 - damping) / n;
+  return M.map((row) => row.map((v) => damping * v + teleport));
+}
+
+function matMul(A, B) {
+  const n = A.length;
+  const m = B[0].length;
+  const inner = B.length;
+  const out = Array.from({ length: n }, () => new Array(m).fill(0));
+  for (let i = 0; i < n; i++) {
+    for (let k = 0; k < inner; k++) {
+      const a = A[i][k];
+      if (a === 0) continue;
+      for (let j = 0; j < m; j++) out[i][j] += a * B[k][j];
+    }
+  }
+  return out;
+}
+
+function identityMatrix(n) {
+  return Array.from({ length: n }, (_, i) =>
+    Array.from({ length: n }, (_, j) => (i === j ? 1 : 0)));
+}
+
 function initRankVector(n) {
   return new Array(n).fill(1 / n);
 }
@@ -177,6 +204,9 @@ const PRESETS = {
 const PageRankCore = {
   buildAdjacency,
   buildTransition,
+  buildGoogle,
+  matMul,
+  identityMatrix,
   initRankVector,
   stepPageRank,
   maxDelta,

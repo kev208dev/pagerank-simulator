@@ -3,6 +3,9 @@ const assert = require('node:assert/strict');
 const {
   buildAdjacency,
   buildTransition,
+  buildGoogle,
+  matMul,
+  identityMatrix,
   initRankVector,
   stepPageRank,
   maxDelta,
@@ -62,6 +65,51 @@ test('stepPageRank matches hand-computed values for a 3-node asymmetric graph', 
   assert.ok(Math.abs(r1[2] - 0.475) < 1e-8);
   const sum = r1.reduce((a, b) => a + b, 0);
   assert.ok(Math.abs(sum - 1) < 1e-8);
+});
+
+test('matMul multiplies two matrices correctly', () => {
+  const A = [[1, 2], [3, 4]];
+  const B = [[5, 6], [7, 8]];
+  assert.deepEqual(matMul(A, B), [[19, 22], [43, 50]]);
+});
+
+test('identityMatrix returns I of the given size', () => {
+  assert.deepEqual(identityMatrix(3), [[1, 0, 0], [0, 1, 0], [0, 0, 1]]);
+});
+
+test('buildGoogle blends transition matrix with teleport term; columns sum to 1', () => {
+  const nodes = [N('a'), N('b'), N('c')];
+  const links = [L('a', 'b'), L('a', 'c'), L('b', 'c'), L('c', 'a')];
+  const G = buildGoogle(nodes, links, 0.85);
+  // G[i][j] = d*M[i][j] + (1-d)/n
+  const M = buildTransition(nodes, links);
+  for (let i = 0; i < 3; i++) {
+    for (let j = 0; j < 3; j++) {
+      assert.ok(Math.abs(G[i][j] - (0.85 * M[i][j] + 0.15 / 3)) < 1e-12);
+    }
+  }
+  for (let j = 0; j < 3; j++) {
+    const colSum = G[0][j] + G[1][j] + G[2][j];
+    assert.ok(Math.abs(colSum - 1) < 1e-12, `column ${j} sums to 1`);
+  }
+});
+
+test('G^t applied to r(0) matches t repeated stepPageRank calls', () => {
+  const nodes = [N('a'), N('b'), N('c')];
+  const links = [L('a', 'b'), L('a', 'c'), L('b', 'c'), L('c', 'a')];
+  const d = 0.85;
+  const M = buildTransition(nodes, links);
+  const G = buildGoogle(nodes, links, d);
+  let power = identityMatrix(3);
+  let r = initRankVector(3);
+  for (let t = 0; t < 5; t++) {
+    power = matMul(G, power);
+    r = stepPageRank(M, r, d);
+  }
+  const viaPower = power.map((row) => row.reduce((sum, v, j) => sum + v / 3, 0));
+  for (let i = 0; i < 3; i++) {
+    assert.ok(Math.abs(viaPower[i] - r[i]) < 1e-12, `component ${i} matches`);
+  }
 });
 
 test('maxDelta returns the largest absolute per-index difference', () => {
