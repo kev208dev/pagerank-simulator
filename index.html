@@ -182,8 +182,8 @@
     <button id="resetBtn">초기화</button>
     <span class="spacer"></span>
     <label class="damping">감쇠계수 d
-      <input type="range" id="dampingSlider" min="0" max="1.0" step="0.01" value="0">
-      <span id="dampingValue">0.00</span>
+      <input type="range" id="dampingSlider" min="0" max="1.0" step="0.01" value="1">
+      <span id="dampingValue">1.00</span>
     </label>
     <button id="stepBtn">다음 단계</button>
     <button id="autoBtn" class="primary">계산 시작</button>
@@ -234,7 +234,7 @@
     nodes: [],       // {id, name, x, y, r, displayR, color}
     links: [],       // {source, target}
     nodeCap: 10,     // max nodes allowed; presets can raise this (e.g. the 60-node scale demo)
-    damping: 0,
+    damping: 1,
     iteration: 0,
     rank: [],
     rankHistory: [], // [{iteration, values: {id: rank}}]
