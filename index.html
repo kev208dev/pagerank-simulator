@@ -257,33 +257,35 @@
     const cy = els.graphCanvas.clientHeight / 2;
     const n = state.nodes.length;
 
+    // Elliptical layout matched to the canvas aspect (~2:1) so the full
+    // width gets used instead of a circle bounded by the short axis.
     if (n <= SINGLE_RING_MAX) {
-      const radius = Math.min(cx, cy) * 0.72;
+      const rx = cx * 0.8, ry = cy * 0.78;
       state.nodes.forEach((node, i) => {
         const angle = (i / n) * Math.PI * 2 - Math.PI / 2;
-        node.x = cx + radius * Math.cos(angle);
-        node.y = cy + radius * Math.sin(angle);
+        node.x = cx + rx * Math.cos(angle);
+        node.y = cy + ry * Math.sin(angle);
       });
       return;
     }
 
-    // Dense graphs: spread nodes across concentric rings instead of one
-    // packed circle. Ring node-counts scale with ring radius so arc
-    // spacing (and therefore node separation) stays roughly constant
-    // across rings, instead of everything piling onto one circumference.
-    const maxRadius = Math.min(cx, cy) * 0.9;
+    // Dense graphs: spread nodes across concentric ellipses. Ring
+    // node-counts scale with ring radius so arc spacing (and therefore
+    // node separation) stays roughly constant across rings, instead of
+    // everything piling onto one circumference.
+    const maxRx = cx * 0.88, maxRy = cy * 0.85;
     const ringCount = Math.max(3, Math.ceil(Math.sqrt(n / 6)));
     const weights = Array.from({ length: ringCount }, (_, i) => i + 1);
     const totalWeight = weights.reduce((a, b) => a + b, 0);
     let idx = 0;
     for (let ring = 0; ring < ringCount; ring++) {
-      const ringRadius = maxRadius * ((ring + 1) / ringCount);
+      const frac = (ring + 1) / ringCount;
       const isLast = ring === ringCount - 1;
       const count = isLast ? n - idx : Math.round(n * weights[ring] / totalWeight);
       for (let k = 0; k < count && idx < n; k++, idx++) {
         const angle = (k / count) * Math.PI * 2 - Math.PI / 2 + ring * 0.35;
-        state.nodes[idx].x = cx + ringRadius * Math.cos(angle);
-        state.nodes[idx].y = cy + ringRadius * Math.sin(angle);
+        state.nodes[idx].x = cx + maxRx * frac * Math.cos(angle);
+        state.nodes[idx].y = cy + maxRy * frac * Math.sin(angle);
       }
     }
   }
@@ -303,8 +305,11 @@
     const cx = w / 2, cy = h / 2;
 
     const sizeScale = Math.min(1, 12 / n);
-    const charge = 2600 * sizeScale * sizeScale + 260;
-    const linkDist = Math.max(55, 150 * sizeScale);
+    // Wide spread: springs set the ideal edge length near half the canvas's
+    // smaller side for small graphs; strong repulsion pushes non-neighbors
+    // further out, and weak centering lets the cloud fill the canvas.
+    const linkDist = Math.max(70, Math.min(cx, cy) * (n <= SINGLE_RING_MAX ? 0.85 : 0.5));
+    const charge = linkDist * linkDist * 0.55;
 
     for (const node of nodes) { node.vx = node.vx || 0; node.vy = node.vy || 0; }
 
@@ -315,7 +320,7 @@
         let d2 = dx * dx + dy * dy;
         if (d2 < 1) { dx = (Math.random() - 0.5); dy = (Math.random() - 0.5); d2 = 1; }
         const d = Math.sqrt(d2);
-        const f = Math.min(6, (charge / d2) * simAlpha);
+        const f = Math.min(8, (charge / d2) * simAlpha);
         const fx = (dx / d) * f, fy = (dy / d) * f;
         a.vx -= fx; a.vy -= fy;
         b.vx += fx; b.vy += fy;
@@ -328,21 +333,45 @@
       if (!a || !b) continue;
       const dx = b.x - a.x, dy = b.y - a.y;
       const d = Math.hypot(dx, dy) || 1;
-      const f = (d - linkDist) * 0.045 * simAlpha;
+      const f = (d - linkDist) * 0.04 * simAlpha;
       const fx = (dx / d) * f, fy = (dy / d) * f;
       a.vx += fx; a.vy += fy;
       b.vx -= fx; b.vy -= fy;
     }
 
-    const pad = 30;
+    // Anisotropic centering: the canvas is ~2:1 wide, so pull much weaker
+    // horizontally and let the cloud spread into the side margins.
     for (const node of nodes) {
       if (node === dragNode) { node.vx = 0; node.vy = 0; continue; }
-      node.vx += (cx - node.x) * 0.012 * simAlpha;
-      node.vy += (cy - node.y) * 0.012 * simAlpha;
+      node.vx += (cx - node.x) * 0.0018 * simAlpha;
+      node.vy += (cy - node.y) * 0.006 * simAlpha;
       node.vx *= 0.82;
       node.vy *= 0.82;
+      const pad = (node.r ?? node.displayR) + 14;
       node.x = Math.max(pad, Math.min(w - pad, node.x + node.vx));
       node.y = Math.max(pad, Math.min(h - pad, node.y + node.vy));
+    }
+
+    // Hard collision pass: no two nodes may overlap (radius + gap), so even
+    // a fully settled layout keeps clear daylight between circles. Uses the
+    // target radius r, not the animated displayR, so layout equilibrium
+    // doesn't depend on transient animation state.
+    const gap = n <= SINGLE_RING_MAX ? 26 : 10;
+    for (let pass = 0; pass < 2; pass++) {
+      for (let i = 0; i < n; i++) {
+        for (let j = i + 1; j < n; j++) {
+          const a = nodes[i], b = nodes[j];
+          let dx = b.x - a.x, dy = b.y - a.y;
+          let d = Math.hypot(dx, dy);
+          const minD = (a.r ?? a.displayR) + (b.r ?? b.displayR) + gap;
+          if (d >= minD) continue;
+          if (d < 0.01) { dx = Math.random() - 0.5; dy = Math.random() - 0.5; d = Math.hypot(dx, dy); }
+          const push = (minD - d) / d / 2;
+          const px = dx * push, py = dy * push;
+          if (a !== dragNode) { a.x -= px; a.y -= py; }
+          if (b !== dragNode) { b.x += px; b.y += py; }
+        }
+      }
     }
   }
 
